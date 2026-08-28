@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "ogibon.homelab",
+  "name": "Homelab Status",
+  "version": "0.1.0",
+  "author": "ogibon",
+  "description": "Polls self-hosted services over HTTP/TCP from this machine and shows one colored health dot per service in the bar.",
+  "kinds": ["service", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Homelab",
+    "description": "Colored health dots for self-hosted services",
+    "category": "System",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}

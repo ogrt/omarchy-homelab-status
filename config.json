@@ -1,0 +1,9 @@
+{
+  "pollIntervalSec": 15,
+  "maxConcurrent": 4,
+  "services": [
+    { "name": "Nextcloud", "url": "https://cloud.local", "type": "http" },
+    { "name": "Proxmox", "host": "10.0.0.5", "port": 8006, "type": "tcp" },
+    { "name": "Jellyfin", "url": "http://10.0.0.6:8096/health", "type": "http" }
+  ]
+}
