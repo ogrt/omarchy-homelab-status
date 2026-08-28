@@ -83,9 +83,24 @@ A bare array of services also works, using the defaults above:
 | `name` | string | Shown on hover/click |
 | `type` | `"http"` \| `"tcp"` | Defaults to `http` |
 | `url` | string | Required for `http` |
+| `host_header` | string | Optional, `http` only — see below |
 | `host`, `port` | string, number | Required for `tcp` |
 | `pollIntervalSec` | number | Default 15, minimum 3 |
 | `maxConcurrent` | number | Default 4, 1–16 |
+
+### Multiple apps behind one reverse-proxy address
+
+If several services share one address (e.g. a Tailscale node or reverse
+proxy that routes by `Host:` header), point `url` at the shared address and
+set `host_header` to the name each app actually expects:
+
+```json
+{ "name": "Immich",      "url": "https://myhost.tailnet-name.ts.net", "host_header": "immich.local" },
+{ "name": "Vaultwarden", "url": "https://myhost.tailnet-name.ts.net", "host_header": "vault.local" }
+```
+
+curl still connects to (and, over HTTPS, verifies the certificate against)
+the host in `url` — only the `Host:` header sent to the proxy changes.
 
 ## Development
 

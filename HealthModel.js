@@ -44,7 +44,12 @@ function parseConfig(raw) {
     if (type === "http") {
       var url = String(entry.url || "").trim()
       if (!url) continue
-      services.push({ name: name, type: "http", url: url })
+      // Strip CR/LF so a stray newline in config.json can't smuggle an
+      // extra header into the curl -H value (request splitting).
+      var hostHeader = String(entry.host_header || "").replace(/[\r\n]/g, "").trim()
+      var svc = { name: name, type: "http", url: url }
+      if (hostHeader) svc.hostHeader = hostHeader
+      services.push(svc)
     } else {
       var host = String(entry.host || "").trim()
       var port = parseInt(entry.port, 10)
@@ -76,8 +81,14 @@ function buildCommand(service) {
   // (notably mDNS/.local names) can stall past it regardless. Wrap with the
   // `timeout` command too so a bad hostname can never hold a worker slot
   // past ~1s beyond the configured check timeout.
-  return ["timeout", "-k", "1", String(CHECK_TIMEOUT_SEC + 1),
-    "curl", "-s", "-m", String(CHECK_TIMEOUT_SEC), "-o", "/dev/null", "-w", "%{http_code} %{time_total}", "--", service.url]
+  var cmd = ["timeout", "-k", "1", String(CHECK_TIMEOUT_SEC + 1),
+    "curl", "-s", "-m", String(CHECK_TIMEOUT_SEC), "-o", "/dev/null", "-w", "%{http_code} %{time_total}"]
+  // Name-based virtual hosting behind a shared reverse-proxy address (e.g.
+  // several apps on one Tailscale node): connect to service.url but ask for
+  // a different Host header, same as curl -H "Host: ..." always has.
+  if (service.hostHeader) cmd.push("-H", "Host: " + service.hostHeader)
+  cmd.push("--", service.url)
+  return cmd
 }
 
 // exitCode/stdout from the process above -> { status, code, latencyMs, error }
