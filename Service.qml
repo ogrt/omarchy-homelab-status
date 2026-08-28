@@ -27,6 +27,10 @@ Item {
 
   // name -> { status: "up"|"warn"|"down"|"unknown", code, latencyMs, checkedAt, error }
   property var status: ({})
+  // name -> array of past "up"|"warn"|"down" strings, oldest first, capped
+  // at historyLimit. Feeds the popup's sparkline.
+  property var history: ({})
+  readonly property int historyLimit: 20
   property bool cycleRunning: false
 
   property var _queue: []
@@ -36,9 +40,37 @@ Item {
     return root.status[name] || { status: "unknown", code: null, latencyMs: null, checkedAt: 0, error: "" }
   }
 
-  function colorFor(name) {
-    var s = statusFor(name).status
+  function historyFor(name) {
+    return root.history[name] || []
+  }
+
+  function colorForStatus(s) {
     return root._colors[s] || root._colors.unknown
+  }
+
+  function colorFor(name) {
+    return colorForStatus(statusFor(name).status)
+  }
+
+  function serviceByName(name) {
+    for (var i = 0; i < root.services.length; i++) {
+      if (root.services[i].name === name) return root.services[i]
+    }
+    return null
+  }
+
+  // Queue a single service outside the normal cycle -- lets the popup offer
+  // a per-row recheck without waiting for (or disturbing) the next full
+  // sweep. Safe to call mid-cycle: it just joins the shared queue.
+  function recheckOne(name) {
+    var svc = root.serviceByName(name)
+    if (!svc) return
+    root._queue.push(svc)
+    root.cycleRunning = true
+    for (var i = 0; i < workerPool.count; i++) {
+      var w = workerPool.objectAt(i)
+      if (w && !w.running) { root._assignNext(w); break }
+    }
   }
 
   function _applyConfig(raw) {
@@ -61,6 +93,14 @@ Item {
     entry.checkedAt = Date.now()
     next[name] = entry
     root.status = next
+
+    var nextHistory = ({})
+    for (var hk in root.history) nextHistory[hk] = root.history[hk]
+    var past = (nextHistory[name] || []).slice()
+    past.push(entry.status)
+    if (past.length > root.historyLimit) past = past.slice(past.length - root.historyLimit)
+    nextHistory[name] = past
+    root.history = nextHistory
   }
 
   function startCycle() {
@@ -102,6 +142,10 @@ Item {
 
     function refresh(): void {
       root.startCycle()
+    }
+
+    function recheck(name: string): void {
+      root.recheckOne(name)
     }
 
     function ping(): string {
