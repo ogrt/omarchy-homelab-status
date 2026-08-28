@@ -45,8 +45,18 @@ omarchy plugin enable ogibon.homelab
 
 ## Configure
 
-Edit `~/.config/omarchy/plugins/ogibon.homelab/config.json` — it hot-reloads
-on save, no restart needed.
+`config.json` holds your real service list and is gitignored on purpose —
+your internal hostnames/IPs never end up in this (public) repo. Start from
+the example and edit it in place, or point `config.json` at wherever you
+keep private config (a symlink works fine):
+
+```bash
+cd ~/.config/omarchy/plugins/ogibon.homelab
+cp config.json.example config.json
+$EDITOR config.json
+```
+
+It hot-reloads on save, no restart needed.
 
 ```json
 {
