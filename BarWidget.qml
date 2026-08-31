@@ -89,6 +89,19 @@ BarWidget {
   implicitWidth: serviceList.length > 0 ? dotsRow.implicitWidth + Style.space(10) : 0
   implicitHeight: barSize
 
+  // Whole-widget click target underneath the dots: the dots themselves are
+  // only ~8px, easy to miss (and a miss can land on the bar's own empty-space
+  // double-click, which toggles bar transparency -- surprising and
+  // unrelated). Declared before dotsRow, so it sits *below* it in stacking
+  // order: hovering a dot still resolves to that dot's own MouseArea on top
+  // (tooltip shows the right service), but a click anywhere else in the
+  // widget's bounds falls through to here and still opens the popup.
+  MouseArea {
+    anchors.fill: parent
+    cursorShape: Qt.PointingHandCursor
+    onClicked: root.popupOpen = !root.popupOpen
+  }
+
   Row {
     id: dotsRow
     anchors.centerIn: parent
@@ -128,9 +141,26 @@ BarWidget {
     }
   }
 
+  // PopupCard centers the card under `anchorItem`, then clamps the result
+  // into [margin, window.width - popupWidth - margin] so it never runs off
+  // screen. The other panels (audio/network/bluetooth) end up flush against
+  // the monitor's right edge because they're PanelWindows docked there
+  // directly; to match that look from a PopupCard, the simplest robust
+  // route is to feed it a deliberately oversized virtual anchor width so
+  // the centered position always overflows -- the same clamp then always
+  // pins the card to window.width - popupWidth - margin, i.e. flush right,
+  // without depending on where our actual (narrow, mid-bar) widget sits.
+  Item {
+    id: rightEdgeAnchor
+    x: 0
+    y: 0
+    height: root.height
+    width: 100000
+  }
+
   PopupCard {
     id: popup
-    anchorItem: root
+    anchorItem: rightEdgeAnchor
     bar: root.bar
     owner: root
     open: root.popupOpen
@@ -144,17 +174,39 @@ BarWidget {
 
       Row {
         width: parent.width
-        spacing: Style.space(8)
+        spacing: Style.space(10)
 
         Text {
-          text: root.summaryLabel
-          color: root.bar.foreground
+          text: "󰒍" // mdi-server
+          color: Color.accent
           font.family: root.bar.fontFamily
-          font.pixelSize: Style.font.bodySmall
-          font.bold: true
-          elide: Text.ElideRight
-          width: parent.width - refreshButton.implicitWidth - Style.space(8)
+          font.pixelSize: Style.font.icon
           anchors.verticalCenter: parent.verticalCenter
+        }
+
+        Column {
+          width: parent.width - refreshButton.implicitWidth - Style.space(28)
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(1)
+
+          Text {
+            text: "Homelab Status"
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+            font.bold: true
+            elide: Text.ElideRight
+            width: parent.width
+          }
+
+          Text {
+            text: root.summaryLabel
+            color: Qt.darker(root.bar.foreground, 1.3)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+            width: parent.width
+          }
         }
 
         Button {
@@ -197,7 +249,15 @@ BarWidget {
 
           Row {
             width: parent.width
-            spacing: Style.space(8)
+            spacing: Style.space(6)
+
+            Text {
+              text: row.modelData.type === "tcp" ? "󰜄" : "󰖟" // mdi-lan-connect / mdi-web
+              color: Qt.darker(root.bar.foreground, 1.3)
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              anchors.verticalCenter: parent.verticalCenter
+            }
 
             Rectangle {
               width: Style.space(8)
@@ -216,7 +276,7 @@ BarWidget {
               font.bold: true
               elide: Text.ElideRight
               anchors.verticalCenter: parent.verticalCenter
-              width: parent.width - Style.space(16) - recheckButton.implicitWidth - statusText.implicitWidth - Style.space(8)
+              width: parent.width - Style.space(30) - recheckButton.implicitWidth - statusText.implicitWidth - Style.space(8)
             }
 
             Text {
@@ -240,49 +300,56 @@ BarWidget {
             }
           }
 
-          Text {
-            text: root.targetLabel(row.modelData)
-            color: Qt.darker(root.bar.foreground, 1.6)
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
-            width: parent.width
-          }
+          // Indented to line up under the name, past the type icon + dot.
+          Column {
+            x: Style.space(28)
+            width: parent.width - Style.space(28)
+            spacing: Style.space(3)
 
-          Text {
-            text: "Checked " + root.agoLabel(row.rowStatus.checkedAt)
-            color: Qt.darker(root.bar.foreground, 1.6)
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
-            width: parent.width
-          }
+            Text {
+              text: root.targetLabel(row.modelData)
+              color: Qt.darker(root.bar.foreground, 1.6)
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+              width: parent.width
+            }
 
-          Text {
-            visible: row.rowStatus.status === "down" && !!row.rowStatus.error
-            text: row.rowStatus.error
-            color: root.homelabService ? root.homelabService.colorForStatus("down") : Color.urgent
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.caption
-            wrapMode: Text.WordWrap
-            width: parent.width
-          }
+            Text {
+              text: "Checked " + root.agoLabel(row.rowStatus.checkedAt)
+              color: Qt.darker(root.bar.foreground, 1.6)
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+              width: parent.width
+            }
 
-          // Uptime sparkline: last historyLimit checks, oldest to newest.
-          Row {
-            visible: row.rowHistory.length > 0
-            spacing: Style.space(2)
-            topPadding: Style.space(2)
+            Text {
+              visible: row.rowStatus.status === "down" && !!row.rowStatus.error
+              text: row.rowStatus.error
+              color: root.homelabService ? root.homelabService.colorForStatus("down") : Color.urgent
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+              width: parent.width
+            }
 
-            Repeater {
-              model: row.rowHistory
+            // Uptime sparkline: last historyLimit checks, oldest to newest.
+            Row {
+              visible: row.rowHistory.length > 0
+              spacing: Style.space(2)
+              topPadding: Style.space(2)
 
-              Rectangle {
-                required property var modelData
-                width: Style.space(4)
-                height: Style.space(8)
-                radius: 1
-                color: root.homelabService ? root.homelabService.colorForStatus(modelData) : Color.muted
+              Repeater {
+                model: row.rowHistory
+
+                Rectangle {
+                  required property var modelData
+                  width: Style.space(4)
+                  height: Style.space(8)
+                  radius: 1
+                  color: root.homelabService ? root.homelabService.colorForStatus(modelData) : Color.muted
+                }
               }
             }
           }
