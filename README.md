@@ -43,6 +43,17 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable ogibon.homelab
 ```
 
+## Remove
+
+```bash
+omarchy plugin remove ogibon.homelab
+```
+
+This deletes `~/.config/omarchy/plugins/ogibon.homelab/` (your git checkout,
+including any real `config.json` you created there) and drops the widget
+from your bar layout. Nothing outside that directory is touched — no other
+files, services, or system config are modified by this plugin.
+
 ## Configure
 
 `config.json` holds your real service list and is gitignored on purpose —
