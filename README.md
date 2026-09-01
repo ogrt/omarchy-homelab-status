@@ -1,5 +1,7 @@
 # Homelab Status
 
+![Homelab Status popup](screen.png)
+
 An [Omarchy](https://omarchy.org/) (Quattro/v4+) shell plugin that shows
 self-hosted service health as colored dots in the top bar — one dot per
 service.
