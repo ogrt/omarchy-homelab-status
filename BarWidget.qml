@@ -30,7 +30,7 @@ BarWidget {
 
   function statusLabel(s) {
     if (s.status === "up") return "Up" + (s.code ? " (" + s.code + ")" : "")
-    if (s.status === "warn") return "Reachable, HTTP " + s.code
+    if (s.status === "warn") return s.code ? ("Reachable, HTTP " + s.code) : (s.error || "Degraded")
     if (s.status === "down") return "Down"
     return "Checking…"
   }
@@ -40,7 +40,9 @@ BarWidget {
   }
 
   function targetLabel(svc) {
-    var addr = svc.type === "tcp" ? (svc.host + ":" + svc.port) : svc.url
+    var addr = svc.type === "tcp" ? (svc.host + ":" + svc.port)
+      : svc.type === "docker" ? (svc.host + "  ·  " + svc.container)
+      : svc.url
     return svc.hostHeader ? (addr + "  (Host: " + svc.hostHeader + ")") : addr
   }
 
@@ -252,7 +254,7 @@ BarWidget {
             spacing: Style.space(6)
 
             Text {
-              text: row.modelData.type === "tcp" ? "󰜄" : "󰖟" // mdi-lan-connect / mdi-web
+              text: row.modelData.type === "tcp" ? "󰜄" : row.modelData.type === "docker" ? "󰡨" : "󰖟" // mdi-lan-connect / mdi-docker / mdi-web
               color: Qt.darker(root.bar.foreground, 1.3)
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.bodySmall
@@ -325,9 +327,9 @@ BarWidget {
             }
 
             Text {
-              visible: row.rowStatus.status === "down" && !!row.rowStatus.error
+              visible: (row.rowStatus.status === "down" || row.rowStatus.status === "warn") && !!row.rowStatus.error
               text: row.rowStatus.error
-              color: root.homelabService ? root.homelabService.colorForStatus("down") : Color.urgent
+              color: root.homelabService ? root.homelabService.colorForStatus(row.rowStatus.status) : Color.urgent
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.caption
               wrapMode: Text.WordWrap

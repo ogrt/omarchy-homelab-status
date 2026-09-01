@@ -4,6 +4,7 @@
 var DEFAULT_INTERVAL_SEC = 15
 var DEFAULT_MAX_CONCURRENT = 4
 var CHECK_TIMEOUT_SEC = 2
+var DEFAULT_NOTIFY = true
 
 // Accepts either the bare array form:
 //   [ { "name": "...", "url": "...", "type": "http" }, ... ]
@@ -17,17 +18,20 @@ function parseConfig(raw) {
     return { error: "invalid JSON: " + e.message, services: [], pollIntervalSec: DEFAULT_INTERVAL_SEC, maxConcurrent: DEFAULT_MAX_CONCURRENT }
   }
 
-  var list, intervalSec, maxConcurrent
+  var list, intervalSec, maxConcurrent, notifyEnabled
   if (Array.isArray(parsed)) {
     list = parsed
     intervalSec = DEFAULT_INTERVAL_SEC
     maxConcurrent = DEFAULT_MAX_CONCURRENT
+    notifyEnabled = DEFAULT_NOTIFY
   } else if (parsed && typeof parsed === "object") {
     list = Array.isArray(parsed.services) ? parsed.services : []
     intervalSec = Number(parsed.pollIntervalSec) > 0 ? Number(parsed.pollIntervalSec) : DEFAULT_INTERVAL_SEC
     maxConcurrent = Number(parsed.maxConcurrent) > 0 ? Number(parsed.maxConcurrent) : DEFAULT_MAX_CONCURRENT
+    // Explicit `false` opts out; anything else (including omitted) keeps the default on.
+    notifyEnabled = parsed.notify !== false
   } else {
-    return { error: "config must be a JSON array or object", services: [], pollIntervalSec: DEFAULT_INTERVAL_SEC, maxConcurrent: DEFAULT_MAX_CONCURRENT }
+    return { error: "config must be a JSON array or object", services: [], pollIntervalSec: DEFAULT_INTERVAL_SEC, maxConcurrent: DEFAULT_MAX_CONCURRENT, notifyEnabled: DEFAULT_NOTIFY }
   }
 
   var services = []
@@ -36,7 +40,7 @@ function parseConfig(raw) {
     var entry = list[i]
     if (!entry || typeof entry !== "object") continue
     var name = String(entry.name || "").trim()
-    var type = entry.type === "tcp" ? "tcp" : "http"
+    var type = entry.type === "tcp" ? "tcp" : entry.type === "docker" ? "docker" : "http"
     if (!name) continue
     if (seenNames[name]) name = name + " (" + (i + 1) + ")"
     seenNames[name] = true
@@ -50,11 +54,20 @@ function parseConfig(raw) {
       var svc = { name: name, type: "http", url: url }
       if (hostHeader) svc.hostHeader = hostHeader
       services.push(svc)
-    } else {
+    } else if (type === "tcp") {
       var host = String(entry.host || "").trim()
       var port = parseInt(entry.port, 10)
       if (!host || !isFinite(port) || port <= 0 || port > 65535) continue
       services.push({ name: name, type: "tcp", host: host, port: port })
+    } else {
+      // docker: health comes from a remote `docker inspect`, over SSH (key-based
+      // auth only -- BatchMode=yes in buildCommand, so it never blocks on a
+      // password prompt). `host` is an SSH target ("user@host"), not the
+      // container's own network address.
+      var sshHost = String(entry.host || "").trim()
+      var container = String(entry.container || "").trim()
+      if (!sshHost || !container) continue
+      services.push({ name: name, type: "docker", host: sshHost, container: container })
     }
   }
 
@@ -62,7 +75,8 @@ function parseConfig(raw) {
     error: services.length === 0 ? "no valid services in config" : "",
     services: services,
     pollIntervalSec: Math.max(3, intervalSec),
-    maxConcurrent: Math.max(1, Math.min(16, maxConcurrent))
+    maxConcurrent: Math.max(1, Math.min(16, maxConcurrent)),
+    notifyEnabled: notifyEnabled
   }
 }
 
@@ -76,6 +90,21 @@ function buildCommand(service) {
     var port = service.port
     var script = "timeout " + CHECK_TIMEOUT_SEC + " bash -c 'exec 3<>/dev/tcp/" + host + "/" + port + "' 2>/dev/null"
     return ["bash", "-c", script]
+  }
+
+  if (service.type === "docker") {
+    // A plain HTTP/TCP check can't tell "container running but failing its
+    // healthcheck" from "up" -- this asks Docker directly instead. Strip to
+    // a safe charset before splicing into the remote command string (ssh
+    // hands a single command string to the remote shell, so this is the
+    // same trust boundary as the tcp branch's bash -c script above).
+    var sshTarget = service.host.replace(/[^A-Za-z0-9@._-]/g, "")
+    var container = service.container.replace(/[^A-Za-z0-9_.-]/g, "")
+    var remoteCmd = "docker inspect --format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' -- " + container
+    return ["timeout", "-k", "1", String(CHECK_TIMEOUT_SEC + 1),
+      "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=" + CHECK_TIMEOUT_SEC,
+      "-o", "StrictHostKeyChecking=accept-new", "-o", "LogLevel=ERROR",
+      sshTarget, remoteCmd]
   }
   // curl's own -m bounds the transfer, but DNS lookups on some resolvers
   // (notably mDNS/.local names) can stall past it regardless. Wrap with the
@@ -99,6 +128,17 @@ function classifyResult(service, exitCode, stdout, elapsedMs) {
       : { status: "down", code: null, latencyMs: elapsedMs, error: "connect failed or timed out" }
   }
 
+  if (service.type === "docker") {
+    if (exitCode !== 0) return { status: "down", code: null, latencyMs: elapsedMs, error: "ssh/docker inspect failed (exit " + exitCode + ")" }
+    var dockerParts = String(stdout || "").trim().split("|")
+    var containerStatus = dockerParts[0] || ""
+    var health = dockerParts[1] || ""
+    if (containerStatus !== "running") return { status: "down", code: null, latencyMs: elapsedMs, error: "container " + (containerStatus || "not found") }
+    if (health === "unhealthy") return { status: "warn", code: null, latencyMs: elapsedMs, error: "container unhealthy" }
+    if (health === "starting") return { status: "warn", code: null, latencyMs: elapsedMs, error: "healthcheck starting" }
+    return { status: "up", code: null, latencyMs: elapsedMs, error: "" }
+  }
+
   if (exitCode !== 0) {
     return { status: "down", code: null, latencyMs: elapsedMs, error: "unreachable or timed out (curl exit " + exitCode + ")" }
   }
@@ -111,4 +151,29 @@ function classifyResult(service, exitCode, stdout, elapsedMs) {
   if (!isFinite(code)) return { status: "down", code: null, latencyMs: latencyMs, error: "no response code" }
   if (code >= 200 && code < 300) return { status: "up", code: code, latencyMs: latencyMs, error: "" }
   return { status: "warn", code: code, latencyMs: latencyMs, error: "" }
+}
+
+// Decide whether a status transition is worth a desktop notification, and
+// build the `omarchy notification send` args if so. Returns null for the
+// first-ever check of a service (nothing changed, it's just now known) and
+// for polls that don't change the status.
+function notifyForTransition(name, prevStatus, entry) {
+  if (!prevStatus || prevStatus === "unknown") return null
+  if (prevStatus === entry.status) return null
+
+  var glyphs = { down: "", warn: "", up: "" } // mdi close-circle / alert / check-circle
+  var urgencies = { down: "critical", warn: "normal", up: "normal" }
+  var labels = { down: "down", warn: "degraded", up: "recovered" }
+
+  var bodyParts = []
+  if (entry.error) bodyParts.push(entry.error)
+  else if (entry.code) bodyParts.push("HTTP " + entry.code)
+  if (entry.latencyMs !== null && entry.latencyMs !== undefined) bodyParts.push(Math.round(entry.latencyMs) + " ms")
+
+  return {
+    headline: name + ": " + (labels[entry.status] || entry.status),
+    body: bodyParts.length > 0 ? bodyParts.join(" · ") : ("was " + prevStatus),
+    urgency: urgencies[entry.status] || "normal",
+    glyph: glyphs[entry.status] || ""
+  }
 }

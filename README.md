@@ -4,22 +4,26 @@
 
 At-a-glance colored status dots for your self-hosted services, right in the
 bar — one dot per service. An [Omarchy](https://omarchy.org/) (Quattro/v4+)
-shell plugin, polling each service over HTTP/TCP from this machine, no
-per-host agent required.
+shell plugin, polling each service over HTTP, TCP, or Docker from this
+machine, no per-host agent required.
 
-- **Green** — up (HTTP 2xx, or TCP connect succeeded)
-- **Yellow** — reachable, but a non-2xx HTTP response
-- **Red** — timeout or connection error
+- **Green** — up (HTTP 2xx, TCP connect succeeded, or a Docker container
+  reported healthy/running)
+- **Yellow** — reachable, but degraded: a non-2xx HTTP response, or a
+  container that's `unhealthy`/still starting its healthcheck
+- **Red** — timeout, connection error, or a container that's stopped/missing
 
 Hover a dot for the service name, status, and last latency; click to open a
-small popup listing every configured service.
+small popup listing every configured service. A dot flipping color also
+fires an Omarchy desktop notification — see [Notifications](#notifications).
 
 ## How it works
 
-- Polling happens **from this machine** over HTTP/TCP — no agent, no
-  per-host install. Every check shells out to `curl` (HTTP) or a plain
-  `bash` TCP socket check via [Quickshell's `Process`](https://quickshell.org/),
-  never QML `XMLHttpRequest`.
+- Polling happens **from this machine** — no agent, no per-host install.
+  Every check shells out via [Quickshell's `Process`](https://quickshell.org/),
+  never QML `XMLHttpRequest`: `curl` for HTTP, a plain `bash` TCP socket
+  check for TCP, or `ssh` + `docker inspect` for Docker (key-based auth
+  only — see [Docker-aware checks](#docker-aware-checks)).
 - Two plugin kinds, one manifest: a headless `service` that polls and holds
   state, and a `bar-widget` that only renders — the widget never blocks on a
   network check.
@@ -76,6 +80,7 @@ It hot-reloads on save, no restart needed.
 {
   "pollIntervalSec": 15,
   "maxConcurrent": 4,
+  "notify": true,
   "services": [
     { "name": "Nextcloud", "url": "https://cloud.local", "type": "http" },
     { "name": "Proxmox",   "host": "10.0.0.5", "port": 8006, "type": "tcp" }
@@ -95,12 +100,44 @@ A bare array of services also works, using the defaults above:
 | Field | Type | Notes |
 |---|---|---|
 | `name` | string | Shown on hover/click |
-| `type` | `"http"` \| `"tcp"` | Defaults to `http` |
+| `type` | `"http"` \| `"tcp"` \| `"docker"` | Defaults to `http` |
 | `url` | string | Required for `http` |
 | `host_header` | string | Optional, `http` only — see below |
 | `host`, `port` | string, number | Required for `tcp` |
+| `host`, `container` | string, string | Required for `docker` — see below |
 | `pollIntervalSec` | number | Default 15, minimum 3 |
 | `maxConcurrent` | number | Default 4, 1–16 |
+| `notify` | boolean | Default `true` — desktop notification on status change |
+
+### Docker-aware checks
+
+A plain HTTP/TCP check can't tell "container running but failing its own
+healthcheck" from "genuinely up" — Immich has hit exactly that. `type:
+"docker"` asks Docker directly instead, over SSH:
+
+```json
+{ "name": "Immich", "type": "docker", "host": "user@myhost.tailnet-name.ts.net", "container": "immich_server" }
+```
+
+- `host` is an **SSH target** (`user@host`), not the container's own network
+  address — the check runs `docker inspect` on that box, not against it.
+- `container` is the container name (or ID) as `docker ps` shows it.
+- Needs key-based SSH already set up to that host (`ssh -o BatchMode=yes
+  <host> true` should succeed with no prompt) — the check never handles a
+  password, so without a working key it will just read as `down`.
+- Status: no `HEALTHCHECK` defined *or* `healthy` → up. `unhealthy` or
+  `starting` → warn. Anything else (`exited`, `restarting`, container not
+  found) → down.
+
+### Notifications
+
+Any status *change* — not every poll — fires `omarchy notification send`:
+critical urgency going down, normal urgency for degraded or recovered. This
+goes through Omarchy's own notification daemon, so it respects the active
+theme and do-not-disturb, and needs nothing beyond what's already on the
+system (no ntfy topic, no external service). The very first check of a
+newly-added service never notifies — there's nothing to "change" from yet.
+Set `"notify": false` in `config.json` to turn it off entirely.
 
 ### Multiple apps behind one reverse-proxy address
 

@@ -5,9 +5,10 @@ import qs.Commons
 import "HealthModel.js" as Health
 import "ThemeColors.js" as ThemeColors
 
-// Headless service: polls the services in config.json over HTTP/TCP via
-// curl/bash + Process (never QML XHR), holds the latest status per service,
-// and exposes it to BarWidget.qml through the shell's serviceFor(id) lookup.
+// Headless service: polls the services in config.json (HTTP via curl, TCP
+// via a bash socket check, Docker via ssh + docker inspect -- all through
+// Process, never QML XHR), holds the latest status per service, and exposes
+// it to BarWidget.qml through the shell's serviceFor(id) lookup.
 // Never does network I/O itself on the QML thread -- every check is a
 // subprocess with its own 2s timeout, run through a small worker pool so a
 // dead host can only ever occupy one slot, not the whole batch.
@@ -23,6 +24,7 @@ Item {
   property var services: []          // parsed from config.json
   property int pollIntervalSec: Health.DEFAULT_INTERVAL_SEC
   property int maxConcurrent: Health.DEFAULT_MAX_CONCURRENT
+  property bool notifyEnabled: Health.DEFAULT_NOTIFY
   property string configError: ""
 
   // name -> { status: "up"|"warn"|"down"|"unknown", code, latencyMs, checkedAt, error }
@@ -78,6 +80,7 @@ Item {
     root.services = parsed.services
     root.pollIntervalSec = parsed.pollIntervalSec
     root.maxConcurrent = Math.min(parsed.maxConcurrent, Math.max(1, parsed.services.length))
+    root.notifyEnabled = parsed.notifyEnabled
     root.configError = parsed.error
     if (parsed.error) console.warn("ogibon.homelab: " + parsed.error + " (" + root.configPath + ")")
     // workerPool.model and pollTimer.interval are declarative bindings on
@@ -88,11 +91,15 @@ Item {
   }
 
   function _setStatus(name, entry) {
+    var prev = root.status[name]
+
     var next = ({})
     for (var k in root.status) next[k] = root.status[k]
     entry.checkedAt = Date.now()
     next[name] = entry
     root.status = next
+
+    root._maybeNotify(name, prev ? prev.status : "unknown", entry)
 
     var nextHistory = ({})
     for (var hk in root.history) nextHistory[hk] = root.history[hk]
@@ -122,6 +129,17 @@ Item {
     worker.startedAt = Date.now()
     worker.command = Health.buildCommand(job)
     worker.running = true
+  }
+
+  // Desktop notification on a status *change*, not every poll -- fires via
+  // the shell's own notification daemon (respects theme + do-not-disturb),
+  // not a raw notify-send. Set "notify": false in config.json to opt out.
+  function _maybeNotify(name, prevStatus, entry) {
+    if (!root.notifyEnabled) return
+    var msg = Health.notifyForTransition(name, prevStatus, entry)
+    if (!msg) return
+    Quickshell.execDetached(["omarchy", "notification", "send", msg.headline, msg.body,
+      "-u", msg.urgency, "-g", msg.glyph, "--app-name", "Homelab Status"])
   }
 
   function _maybeFinishCycle() {
