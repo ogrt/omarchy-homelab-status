@@ -2,9 +2,10 @@
 
 ![Homelab Status popup](screen.png)
 
-An [Omarchy](https://omarchy.org/) (Quattro/v4+) shell plugin that shows
-self-hosted service health as colored dots in the top bar — one dot per
-service.
+At-a-glance colored status dots for your self-hosted services, right in the
+bar — one dot per service. An [Omarchy](https://omarchy.org/) (Quattro/v4+)
+shell plugin, polling each service over HTTP/TCP from this machine, no
+per-host agent required.
 
 - **Green** — up (HTTP 2xx, or TCP connect succeeded)
 - **Yellow** — reachable, but a non-2xx HTTP response

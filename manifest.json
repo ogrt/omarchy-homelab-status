@@ -4,7 +4,7 @@
   "name": "Homelab Status",
   "version": "0.1.0",
   "author": "ogibon",
-  "description": "Polls self-hosted services over HTTP/TCP from this machine and shows one colored health dot per service in the bar.",
+  "description": "At-a-glance colored status dots for your self-hosted services, right in the bar. Polls each one over HTTP/TCP from this machine — no per-host agent.",
   "kinds": ["service", "bar-widget"],
   "keepLoaded": true,
   "entryPoints": {
@@ -14,7 +14,7 @@
   "barWidget": {
     "displayName": "Homelab",
     "description": "Colored health dots for self-hosted services",
-    "category": "System",
+    "category": "Widgets",
     "defaultSection": "right",
     "allowMultiple": false
   }
