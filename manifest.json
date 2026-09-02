@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "ogibon.homelab",
   "name": "Homelab Status",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "ogibon",
   "description": "At-a-glance colored status dots for your self-hosted services, right in the bar. Polls each one over HTTP, TCP, or Docker from this machine — no per-host agent.",
   "kinds": ["service", "bar-widget"],
