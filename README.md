@@ -226,6 +226,10 @@ quickshell ipc -p $OMARCHY_PATH/shell call ogibon.homelab status
 quickshell ipc -p $OMARCHY_PATH/shell call ogibon.homelab refresh
 ```
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 MIT
