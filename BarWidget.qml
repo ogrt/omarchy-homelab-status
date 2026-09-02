@@ -41,7 +41,7 @@ BarWidget {
 
   function targetLabel(svc) {
     var addr = svc.type === "tcp" ? (svc.host + ":" + svc.port)
-      : svc.type === "docker" ? (svc.host + "  ·  " + svc.container)
+      : svc.type === "docker" ? ((svc.local ? "local" : svc.host) + "  ·  " + svc.container)
       : svc.url
     return svc.hostHeader ? (addr + "  (Host: " + svc.hostHeader + ")") : addr
   }
@@ -87,8 +87,15 @@ BarWidget {
     return parts.length > 0 ? parts.join(" · ") : "No services checked yet"
   }
 
+  // Worst status across all services, for the single-dot compact mode --
+  // down beats warn beats up, so the bar always shows the thing worth
+  // noticing rather than averaging it away.
+  readonly property string worstStatus: downCount > 0 ? "down" : warnCount > 0 ? "warn" : upCount > 0 ? "up" : "unknown"
+
+  readonly property bool compactMode: homelabService ? homelabService.compactMode : false
+
   visible: serviceList.length > 0
-  implicitWidth: serviceList.length > 0 ? dotsRow.implicitWidth + Style.space(10) : 0
+  implicitWidth: serviceList.length > 0 ? (compactMode ? compactSlot.width : dotsRow.implicitWidth) + Style.space(10) : 0
   implicitHeight: barSize
 
   // Whole-widget click target underneath the dots: the dots themselves are
@@ -104,8 +111,38 @@ BarWidget {
     onClicked: root.popupOpen = !root.popupOpen
   }
 
+  // Single-dot mode (config "compact": true) for people with enough
+  // services that one-dot-per-service would sprawl across the bar -- worst
+  // status wins, full detail is still one click away in the popup.
+  Item {
+    id: compactSlot
+    visible: root.compactMode
+    anchors.centerIn: parent
+    width: root.dotSize + Style.space(4)
+    height: root.dotSize + Style.space(4)
+
+    Rectangle {
+      anchors.centerIn: parent
+      width: root.dotSize
+      height: root.dotSize
+      radius: width / 2
+      color: root.homelabService ? root.homelabService.colorForStatus(root.worstStatus) : Color.muted
+      Behavior on color { ColorAnimation { duration: 200 } }
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onEntered: if (root.bar) root.bar.showTooltip(compactSlot, root.summaryLabel)
+      onExited: if (root.bar) root.bar.hideTooltip(compactSlot)
+      onClicked: root.popupOpen = !root.popupOpen
+    }
+  }
+
   Row {
     id: dotsRow
+    visible: !root.compactMode
     anchors.centerIn: parent
     spacing: Style.space(6)
 
@@ -166,7 +203,7 @@ BarWidget {
     bar: root.bar
     owner: root
     open: root.popupOpen
-    contentWidth: popup.fittedContentWidth(Style.space(320))
+    contentWidth: popup.fittedContentWidth(Style.space(380))
     contentHeight: popup.fittedContentHeight(column.implicitHeight)
 
     Column {
@@ -222,14 +259,25 @@ BarWidget {
         }
       }
 
-      Text {
-        visible: root.homelabService && root.homelabService.configError !== ""
-        text: "⚠ " + (root.homelabService ? root.homelabService.configError : "")
-        color: root.homelabService ? root.homelabService.colorForStatus("down") : Color.urgent
-        font.family: root.bar.fontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
-        width: parent.width
+      // Config error (red, "0 services") and warning (yellow, "N skipped")
+      // are the same banner shape with a different source/color, so one
+      // Repeater renders both instead of duplicating the block.
+      Repeater {
+        model: [
+          { text: root.homelabService ? root.homelabService.configError : "", statusKey: "down" },
+          { text: root.homelabService ? root.homelabService.configWarning : "", statusKey: "warn" }
+        ]
+
+        Text {
+          required property var modelData
+          visible: modelData.text !== ""
+          text: "⚠ " + modelData.text
+          color: root.homelabService ? root.homelabService.colorForStatus(modelData.statusKey) : Color.urgent
+          font.family: root.bar.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+          width: column.width
+        }
       }
 
       PanelSeparator {
@@ -243,11 +291,34 @@ BarWidget {
         Column {
           id: row
           required property var modelData
+          required property int index
           width: column.width
           spacing: Style.space(3)
 
           readonly property var rowStatus: root.homelabService ? root.homelabService.statusFor(modelData.name) : { status: "unknown" }
           readonly property var rowHistory: root.homelabService ? root.homelabService.historyFor(modelData.name) : []
+          readonly property string rowGroup: modelData.group || ""
+          // Header only on the first service of each group, so services
+          // sharing a "group" in config.json render under one label.
+          readonly property bool isGroupHeader: rowGroup !== "" &&
+            (index === 0 || (root.serviceList[index - 1].group || "") !== rowGroup)
+          // Depends on root.nowMs so a snooze that just expired clears the
+          // button/label without waiting for the next status check.
+          readonly property bool rowSnoozed: {
+            root.nowMs
+            return root.homelabService ? root.homelabService.isSnoozed(modelData.name) : false
+          }
+
+          Text {
+            visible: row.isGroupHeader
+            text: row.rowGroup
+            color: Color.accent
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            topPadding: row.index === 0 ? 0 : Style.space(6)
+            width: parent.width
+          }
 
           Row {
             width: parent.width
@@ -278,7 +349,7 @@ BarWidget {
               font.bold: true
               elide: Text.ElideRight
               anchors.verticalCenter: parent.verticalCenter
-              width: parent.width - Style.space(30) - recheckButton.implicitWidth - statusText.implicitWidth - Style.space(8)
+              width: parent.width - Style.space(30) - snoozeButton.implicitWidth - recheckButton.implicitWidth - statusText.implicitWidth - Style.space(14)
             }
 
             Text {
@@ -288,6 +359,17 @@ BarWidget {
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.caption
               anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Button {
+              id: snoozeButton
+              iconText: row.rowSnoozed ? "󰂛" : "󰂚" // mdi bell-off / bell-outline
+              iconSize: Style.font.caption
+              foreground: row.rowSnoozed ? (root.homelabService ? root.homelabService.colorForStatus("warn") : root.bar.foreground) : root.bar.foreground
+              horizontalPadding: Style.space(4)
+              verticalPadding: Style.space(2)
+              tooltipText: row.rowSnoozed ? "Notifications snoozed — click to resume" : "Snooze notifications " + (root.homelabService ? root.homelabService.snoozeMinutes : 30) + "m"
+              onClicked: if (root.homelabService) root.homelabService.toggleSnooze(row.modelData.name)
             }
 
             Button {

@@ -1,6 +1,6 @@
 # Homelab Status
 
-![Homelab Status popup](screen.png)
+![Homelab Status popup](preview.png)
 
 At-a-glance colored status dots for your self-hosted services, right in the
 bar — one dot per service. An [Omarchy](https://omarchy.org/) (Quattro/v4+)
@@ -74,7 +74,10 @@ cp config.json.example config.json
 $EDITOR config.json
 ```
 
-It hot-reloads on save, no restart needed.
+It hot-reloads on save, no restart needed. An entry that can't be parsed
+(missing name/url/host, bad port, etc.) is skipped rather than failing the
+whole file — the popup shows a warning naming which ones and why, so a typo
+doesn't silently drop a service with no explanation.
 
 ```json
 {
@@ -105,9 +108,14 @@ A bare array of services also works, using the defaults above:
 | `host_header` | string | Optional, `http` only — see below |
 | `host`, `port` | string, number | Required for `tcp` |
 | `host`, `container` | string, string | Required for `docker` — see below |
+| `group` | string | Optional — services sharing a `group` get a header in the popup |
+| `intervalSec` | number | Optional, per-service override of `pollIntervalSec`, minimum 3 |
+| `warnLatencyMs` | number | Optional, per-service override of the top-level `warnLatencyMs` |
 | `pollIntervalSec` | number | Default 15, minimum 3 |
 | `maxConcurrent` | number | Default 4, 1–16 |
 | `notify` | boolean | Default `true` — desktop notification on status change |
+| `warnLatencyMs` | number | Default off — an `http` check slower than this counts as degraded, not just up |
+| `compact` | boolean | Default `false` — one worst-status dot in the bar instead of one per service |
 
 ### Docker-aware checks
 
@@ -121,10 +129,15 @@ healthcheck" from "genuinely up" — Immich has hit exactly that. `type:
 
 - `host` is an **SSH target** (`user@host`), not the container's own network
   address — the check runs `docker inspect` on that box, not against it.
+  Omit `host` entirely for a container running on the same machine as the
+  shell — the check then runs `docker inspect` directly, no SSH hop or key
+  required. (Only *omitting* it means local — an SSH config alias that
+  happens to be named `localhost` still goes through SSH as normal.)
 - `container` is the container name (or ID) as `docker ps` shows it.
-- Needs key-based SSH already set up to that host (`ssh -o BatchMode=yes
-  <host> true` should succeed with no prompt) — the check never handles a
-  password, so without a working key it will just read as `down`.
+- A remote `host` needs key-based SSH already set up (`ssh -o
+  BatchMode=yes <host> true` should succeed with no prompt) — the check
+  never handles a password, so without a working key it will just read as
+  `down`.
 - Status: no `HEALTHCHECK` defined *or* `healthy` → up. `unhealthy` or
   `starting` → warn. Anything else (`exited`, `restarting`, container not
   found) → down.
@@ -137,7 +150,54 @@ goes through Omarchy's own notification daemon, so it respects the active
 theme and do-not-disturb, and needs nothing beyond what's already on the
 system (no ntfy topic, no external service). The very first check of a
 newly-added service never notifies — there's nothing to "change" from yet.
-Set `"notify": false` in `config.json` to turn it off entirely.
+Set `"notify": false` in `config.json` to turn it off entirely, or mute a
+single service temporarily with the bell icon next to it in the popup (30
+minutes, click again to resume early) — handy mid-maintenance on a box you
+already know is flapping.
+
+### Per-service poll interval
+
+Everything polls at `pollIntervalSec` by default. A noisy or low-priority
+service can run less often:
+
+```json
+{ "name": "Pi-hole", "host": "10.0.0.8", "port": 53, "type": "tcp", "intervalSec": 60 }
+```
+
+Each service tracks its own next-due time, so overriding one doesn't affect
+any other — no shared cadence to work around.
+
+### Slow-response warning
+
+An `http` check only counts a non-2xx response as degraded by default. Set
+`warnLatencyMs` (globally, or per-service to override it) to also flag a
+*successful* response that's just slow:
+
+```json
+{ "warnLatencyMs": 1500, "services": [ ... ] }
+```
+
+A response taking longer than that turns the dot yellow with a "slow
+response (N ms)" detail in the popup, same as any other degraded state.
+
+### Grouping services in the popup
+
+Give services a shared `group` and the popup renders a header above the
+first one, same order as `config.json`:
+
+```json
+{ "name": "Proxmox", "host": "10.0.0.5", "port": 8006, "type": "tcp", "group": "Infra" },
+{ "name": "Pi-hole", "host": "10.0.0.8", "port": 53, "type": "tcp", "group": "Infra" }
+```
+
+Services without a `group` render with no header, in place.
+
+### Compact bar mode
+
+With `"compact": true`, the bar shows a single dot (worst status across all
+services wins) instead of one per service — useful once the list grows past
+a handful. Hovering it still summarizes counts ("3 up · 1 down"), and
+clicking it opens the same full popup as the normal mode.
 
 ### Multiple apps behind one reverse-proxy address
 
