@@ -272,6 +272,7 @@ BarWidget {
           required property var modelData
           visible: modelData.text !== ""
           text: "⚠ " + modelData.text
+          textFormat: Text.PlainText
           color: root.homelabService ? root.homelabService.colorForStatus(modelData.statusKey) : Color.urgent
           font.family: root.bar.fontFamily
           font.pixelSize: Style.font.caption
@@ -312,6 +313,7 @@ BarWidget {
           Text {
             visible: row.isGroupHeader
             text: row.rowGroup
+            textFormat: Text.PlainText
             color: Color.accent
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
@@ -343,6 +345,7 @@ BarWidget {
 
             Text {
               text: row.modelData.name
+              textFormat: Text.PlainText
               color: root.bar.foreground
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.bodySmall
@@ -355,6 +358,7 @@ BarWidget {
             Text {
               id: statusText
               text: root.statusLabel(row.rowStatus) + (root.latencyLabel(row.rowStatus) ? "  ·  " + root.latencyLabel(row.rowStatus) : "")
+              textFormat: Text.PlainText
               color: Qt.darker(root.bar.foreground, 1.3)
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.caption
@@ -392,6 +396,7 @@ BarWidget {
 
             Text {
               text: root.targetLabel(row.modelData)
+              textFormat: Text.PlainText
               color: Qt.darker(root.bar.foreground, 1.6)
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.caption
@@ -411,6 +416,7 @@ BarWidget {
             Text {
               visible: (row.rowStatus.status === "down" || row.rowStatus.status === "warn") && !!row.rowStatus.error
               text: row.rowStatus.error
+              textFormat: Text.PlainText
               color: root.homelabService ? root.homelabService.colorForStatus(row.rowStatus.status) : Color.urgent
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.caption
